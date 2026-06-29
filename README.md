@@ -2,7 +2,8 @@
 
 A tiny, quiet macOS menu-bar app that watches the foreground window via the
 Accessibility API, stages the captured text locally, and periodically rolls it
-up into a single **on-device-summarized** bullet in your Obsidian daily note.
+up into an **on-device-summarized** Obsidian entry with a bounded, redacted
+evidence excerpt.
 
 It is a deliberate, minimal alternative to OCR/screen-recording activity loggers:
 it reads UI text directly from the Accessibility tree (near-idle when you aren't
@@ -19,7 +20,10 @@ switching context) and never captures the screen, audio, or video.
 2. **Stage** each capture to a local log so nothing is lost to a crash.
 3. **Summarize** the pending chunk with Apple's on-device model when a trigger
    fires (the log fills up, or an interval elapses).
-4. **Append** one `- HH:mm — <summary>` bullet to today's Obsidian daily note.
+4. **Append** one `- HH:mm — <summary>` entry to today's Obsidian daily note,
+   plus a small redacted `Evidence` block from the source text. The summary is
+   for fast scanning; the evidence preserves enough context for exact recall
+   questions without keeping a full raw archive.
 
 ## Requirements
 

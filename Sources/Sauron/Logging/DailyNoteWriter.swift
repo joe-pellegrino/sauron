@@ -1,9 +1,9 @@
 import Foundation
 
-/// Appends one summarized, timestamped bullet to today's Obsidian daily note.
-/// The detailed text lives in the local staging log (`RawLog`); Obsidian only
-/// ever sees the rolled-up summary, which keeps the note easy for an agent to
-/// read. Handles directory/file creation and front-matter.
+/// Appends one summarized, timestamped entry to today's Obsidian daily note.
+/// Each entry includes both a compact summary and a bounded, redacted evidence
+/// excerpt from the raw staging log so later recall can answer exact questions
+/// without relying solely on model-written paraphrase.
 enum DailyNoteWriter {
 
     private static let fileDateFormatter: DateFormatter = {
@@ -22,9 +22,22 @@ enum DailyNoteWriter {
 
     /// Append `- HH:mm — <summary>` to the daily note for `date`'s calendar day.
     /// `dailyNotesDir` is the user-chosen Obsidian folder (see `Settings`).
-    static func appendSummary(_ summary: String, at date: Date, to dailyNotesDir: String) {
+    @discardableResult
+    static func appendSummary(_ summary: String, at date: Date, to dailyNotesDir: String) -> Bool {
+        appendEntry(summary: summary, evidence: nil, at: date, to: dailyNotesDir)
+    }
+
+    /// Append a summary plus optional redacted source evidence. The evidence is
+    /// intentionally stored beside the model summary in Obsidian: the summary is
+    /// for fast scanning, while the evidence preserves enough local context for
+    /// questions like "what did I tell Mike?" without needing the original app.
+    @discardableResult
+    static func appendEntry(summary: String,
+                            evidence: String?,
+                            at date: Date,
+                            to dailyNotesDir: String) -> Bool {
         let cleaned = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
+        guard !cleaned.isEmpty else { return false }
 
         let dateString = fileDateFormatter.string(from: date)
         let fileURL = URL(fileURLWithPath: dailyNotesDir)
@@ -33,8 +46,17 @@ enum DailyNoteWriter {
         ensureDirectory(dailyNotesDir)
         ensureFile(at: fileURL, dateString: dateString)
 
-        let bullet = "- \(timeFormatter.string(from: date)) — \(cleaned)\n"
-        append(bullet, to: fileURL)
+        var entry = "- \(timeFormatter.string(from: date)) — \(cleaned)\n"
+        if let evidence = evidence?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !evidence.isEmpty {
+            entry += "  - Evidence:\n"
+            entry += "    ```text\n"
+            for line in evidence.split(separator: "\n", omittingEmptySubsequences: false) {
+                entry += "    \(line)\n"
+            }
+            entry += "    ```\n"
+        }
+        return append(entry, to: fileURL)
     }
 
     /// Ensure the daily note for `date` exists (with front-matter), creating it
@@ -70,11 +92,93 @@ enum DailyNoteWriter {
     }
 
     /// Append via FileHandle → seekToEnd → write.
-    private static func append(_ text: String, to url: URL) {
-        guard let data = text.data(using: .utf8) else { return }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+    @discardableResult
+    private static func append(_ text: String, to url: URL) -> Bool {
+        guard let data = text.data(using: .utf8) else { return false }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return false }
         defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data)
+        do {
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+            return true
+        } catch {
+            return false
+        }
+    }
+}
+
+/// Converts the transient raw staging log into a small, redacted source excerpt
+/// suitable for Obsidian. This deliberately does not summarize: it preserves the
+/// words the Accessibility tree exposed, capped and scrubbed, so downstream
+/// agents have evidence rather than only the model's interpretation.
+enum EvidenceFormatter {
+    private static let maxRecordChars = 1_200
+    private static let maxTotalChars = 6_000
+    private static let maxRecords = 8
+
+    static func format(_ rawText: String) -> String? {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let records = splitRecords(trimmed)
+        var kept: [String] = []
+        var total = 0
+
+        for record in records.suffix(maxRecords) {
+            let cleaned = cleanRecord(record)
+            guard !cleaned.isEmpty else { continue }
+            let redacted = SensitiveFilter.redact(cleaned) ?? cleaned
+            let capped = cap(redacted, to: maxRecordChars)
+            if total + capped.count > maxTotalChars { break }
+            kept.append(capped)
+            total += capped.count
+        }
+
+        guard !kept.isEmpty else { return nil }
+        return kept.joined(separator: "\n\n---\n\n")
+    }
+
+    private static func splitRecords(_ rawText: String) -> [String] {
+        rawText
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func cleanRecord(_ record: String) -> String {
+        let lines = record
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard !lines.isEmpty else { return "" }
+
+        var cleaned: [String] = []
+        var previous: String?
+        for line in lines {
+            let collapsed = line
+                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !collapsed.isEmpty else { continue }
+            guard collapsed != previous else { continue }
+            guard !isLowSignalChrome(collapsed) else { continue }
+            cleaned.append(collapsed)
+            previous = collapsed
+        }
+        return cleaned.joined(separator: "\n")
+    }
+
+    private static func isLowSignalChrome(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        let chrome = [
+            "back", "forward", "reload", "share", "search", "new tab",
+            "minimize", "maximize", "close", "toolbar", "sidebar"
+        ]
+        return line.count < 3 || chrome.contains(lower)
+    }
+
+    private static func cap(_ text: String, to limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let end = text.index(text.startIndex, offsetBy: limit)
+        return String(text[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            + "\n[truncated]"
     }
 }

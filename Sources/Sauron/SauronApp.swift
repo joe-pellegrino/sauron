@@ -190,9 +190,11 @@ final class AppState: ObservableObject {
     }
 
     /// Drain the pending raw chunk, summarize it on-device, and append one
-    /// timestamped bullet to the daily note. The raw lines are cleared up front
-    /// so captures arriving during the async summary accumulate into the next
-    /// chunk. Re-entrancy is guarded so overlapping triggers can't double-write.
+    /// timestamped entry to the daily note. The entry includes a model summary
+    /// plus a redacted evidence excerpt, preserving enough context for exact
+    /// recall without keeping a full raw archive. The raw lines are cleared up
+    /// front so captures arriving during the async summary accumulate into the
+    /// next chunk; if the write fails, the snapshot is restored.
     private func summarizeFlush() {
         guard !summarizing else { return }
         guard !rawLog.isEmpty else { return }
@@ -206,7 +208,15 @@ final class AppState: ObservableObject {
         summarizing = true
         Task {
             let summary = await Summarizer.summarize(snapshot) ?? Summarizer.fallback(snapshot)
-            DailyNoteWriter.appendSummary(summary, at: timestamp, to: Settings.shared.dailyNotesDir)
+            let evidence = EvidenceFormatter.format(snapshot)
+            let didWrite = DailyNoteWriter.appendEntry(summary: summary,
+                                                       evidence: evidence,
+                                                       at: timestamp,
+                                                       to: Settings.shared.dailyNotesDir)
+            if !didWrite {
+                rawLog.restore(snapshot, firstTimestamp: timestamp)
+                pendingLines = rawLog.lineCount
+            }
             summarizing = false
         }
     }
