@@ -59,13 +59,37 @@ final class RawLog {
         (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
     }
 
-    /// Discard the pending chunk and reset state. Called after its summary is
-    /// successfully written to Obsidian.
+    /// Discard the pending chunk and reset state after it has been handed off
+    /// for writing to Obsidian.
     func clear() {
         try? FileManager.default.removeItem(at: fileURL)
         lineCount = 0
         lastKey = nil
         firstTimestamp = nil
+    }
+
+    /// Restore a drained snapshot if the daily-note write fails. Captures that
+    /// arrived while the async summary was in flight remain in `pending.log`; the
+    /// failed snapshot is prepended so it can be retried on the next flush.
+    func restore(_ snapshot: String, firstTimestamp timestamp: Date) {
+        let current = readAll()
+        let restored: String
+        if current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            restored = snapshot
+        } else {
+            restored = snapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+                + "\n\n"
+                + current
+        }
+
+        guard let data = restored.data(using: .utf8) else { return }
+        try? data.write(to: fileURL, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+
+        lineCount = restored.reduce(into: 0) { count, ch in if ch == "\n" { count += 1 } }
+        lastKey = nil
+        firstTimestamp = timestamp
     }
 
     // MARK: - Internals
