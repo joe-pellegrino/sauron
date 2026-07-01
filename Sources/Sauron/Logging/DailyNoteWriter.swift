@@ -111,10 +111,16 @@ enum DailyNoteWriter {
 /// suitable for Obsidian. This deliberately does not summarize: it preserves the
 /// words the Accessibility tree exposed, capped and scrubbed, so downstream
 /// agents have evidence rather than only the model's interpretation.
+///
+/// The caps are deliberately TIGHT — the verbose model summary carries the
+/// recall load, and this excerpt is only a short verbatim anchor (e.g. the exact
+/// words of one message). It is NOT a transcript: an earlier 6 KB-per-flush cap,
+/// multiplied across hundreds of daily flushes, bloated notes past 2M characters
+/// and broke Obsidian indexing. Keep the total small.
 enum EvidenceFormatter {
-    private static let maxRecordChars = 1_200
-    private static let maxTotalChars = 6_000
-    private static let maxRecords = 8
+    private static let maxRecordChars = 300
+    private static let maxTotalChars = 500
+    private static let maxRecords = 3
 
     static func format(_ rawText: String) -> String? {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)

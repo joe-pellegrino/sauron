@@ -19,6 +19,22 @@ final class EvidenceContextTests: XCTestCase {
         XCTAssertTrue(evidence.contains("mitzvah and wedding sections"))
     }
 
+    func testEvidenceFormatterCapsTotalSizeForLargeChunks() {
+        // A large multi-record chunk (the kind that previously dumped ~6 KB per
+        // flush and bloated daily notes past Obsidian's index limit) must now be
+        // capped to a short anchor. Build 20 fat records of distinct filler.
+        let raw = (0..<20).map { i in
+            "[10:\(String(format: "%02d", i))] Editor — File\(i).swift\n"
+                + String(repeating: "line \(i) of content here ", count: 60)
+        }.joined(separator: "\n\n")
+
+        let evidence = EvidenceFormatter.format(raw) ?? ""
+
+        // Tight bound: a few capped records plus separators, never kilobytes.
+        XCTAssertLessThanOrEqual(evidence.count, 1_000)
+        XCTAssertFalse(evidence.isEmpty)
+    }
+
     func testEvidenceFormatterRedactsSensitiveValues() {
         let password = "PLACEHOLDER" + "pwvalue00"
         let raw = """

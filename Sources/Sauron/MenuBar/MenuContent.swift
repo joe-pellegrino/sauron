@@ -68,7 +68,7 @@ struct MenuContent: View {
         case .needsAccessibility:
             return "⚠︎ Needs Accessibility access"
         case .logging:
-            return "Logging · \(state.pendingLines) pending"
+            return "Logging · \(state.pendingCaptures) pending"
         case .paused:
             return "Paused"
         }

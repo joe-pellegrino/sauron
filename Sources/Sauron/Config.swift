@@ -10,8 +10,10 @@ enum Config {
     // up into ONE summarized, datestamped bullet in the Obsidian daily note.
     // A summary is produced when EITHER trigger fires, whichever comes first:
 
-    //   • the staging log reaches this many lines, or
-    static let summaryLineThreshold = 40
+    //   • the staging log reaches this many CAPTURES (distinct context
+    //     switches — NOT lines; a single body capture is many lines, so a
+    //     line-based trigger fired every 2-4 switches and flooded the note), or
+    static let summaryCaptureThreshold = 40
 
     //   • this much time elapses with anything buffered.
     static let summaryInterval: TimeInterval = 15 * 60   // 15 minutes

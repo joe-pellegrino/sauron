@@ -27,7 +27,7 @@ final class AppState: ObservableObject {
     }
 
     @Published private(set) var status: Status = .needsAccessibility
-    @Published private(set) var pendingLines = 0
+    @Published private(set) var pendingCaptures = 0
     @Published var launchAtLogin = false
     /// Live Accessibility-trust flag, surfaced to the welcome screen so its
     /// "Grant access" step flips to a checkmark the moment the user grants it.
@@ -145,9 +145,10 @@ final class AppState: ObservableObject {
     private func ingest(_ capture: Capture) {
         guard status == .logging else { return }
         if rawLog.append(capture) {
-            pendingLines = rawLog.lineCount
-            // Line-count trigger: summarize once enough has accumulated.
-            if rawLog.lineCount >= Config.summaryLineThreshold {
+            pendingCaptures = rawLog.captureCount
+            // Capture-count trigger: summarize once enough context switches have
+            // accumulated (counting captures, not lines — see RawLog.captureCount).
+            if rawLog.captureCount >= Config.summaryCaptureThreshold {
                 summarizeFlush()
             }
         }
@@ -202,7 +203,7 @@ final class AppState: ObservableObject {
         let snapshot = rawLog.readAll()
         let timestamp = rawLog.firstTimestamp ?? Date()
         rawLog.clear()
-        pendingLines = 0
+        pendingCaptures = 0
         guard !snapshot.isEmpty else { return }
 
         summarizing = true
@@ -215,7 +216,7 @@ final class AppState: ObservableObject {
                                                        to: Settings.shared.dailyNotesDir)
             if !didWrite {
                 rawLog.restore(snapshot, firstTimestamp: timestamp)
-                pendingLines = rawLog.lineCount
+                pendingCaptures = rawLog.captureCount
             }
             summarizing = false
         }

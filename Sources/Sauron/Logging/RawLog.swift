@@ -10,7 +10,11 @@ import Foundation
 final class RawLog {
     private let fileURL: URL
     private var lastKey: String?
-    private(set) var lineCount = 0
+    /// Number of captures (distinct context switches) staged in the current
+    /// pending chunk. This — NOT a raw newline count — drives the flush trigger:
+    /// a single body capture spans many lines, so a line-based threshold tripped
+    /// after only 2-4 switches and produced hundreds of note entries per day.
+    private(set) var captureCount = 0
     /// Timestamp of the first capture in the current pending chunk — used to
     /// datestamp the summary bullet at the start of the window it covers.
     private(set) var firstTimestamp: Date?
@@ -38,7 +42,7 @@ final class RawLog {
         recoverExisting()
     }
 
-    var isEmpty: Bool { lineCount == 0 }
+    var isEmpty: Bool { captureCount == 0 }
 
     /// Append a capture, skipping it if its context key matches the previous
     /// one. Returns true if it was written.
@@ -50,7 +54,7 @@ final class RawLog {
 
         let record = format(capture)
         write(record)
-        lineCount += record.reduce(into: 1) { count, ch in if ch == "\n" { count += 1 } }
+        captureCount += 1
         return true
     }
 
@@ -63,7 +67,7 @@ final class RawLog {
     /// for writing to Obsidian.
     func clear() {
         try? FileManager.default.removeItem(at: fileURL)
-        lineCount = 0
+        captureCount = 0
         lastKey = nil
         firstTimestamp = nil
     }
@@ -87,12 +91,21 @@ final class RawLog {
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
 
-        lineCount = restored.reduce(into: 0) { count, ch in if ch == "\n" { count += 1 } }
+        captureCount = Self.countRecords(restored)
         lastKey = nil
         firstTimestamp = timestamp
     }
 
     // MARK: - Internals
+
+    /// Count staged captures in a chunk. Each capture is written as a record
+    /// terminated by a blank line, so records are the non-empty blocks split on
+    /// "\n\n" — the same record boundary `EvidenceFormatter` uses.
+    private static func countRecords(_ text: String) -> Int {
+        text.components(separatedBy: "\n\n")
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .count
+    }
 
     /// One readable record per capture: a header line plus the captured body.
     ///
@@ -139,7 +152,7 @@ final class RawLog {
     private func recoverExisting() {
         let existing = readAll()
         guard !existing.isEmpty else { return }
-        lineCount = existing.reduce(into: 0) { count, ch in if ch == "\n" { count += 1 } }
+        captureCount = Self.countRecords(existing)
         firstTimestamp = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.creationDate]) as? Date
     }
 }
